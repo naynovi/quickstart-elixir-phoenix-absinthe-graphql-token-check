@@ -1,375 +1,255 @@
-# Approov QuickStart - Elixir Phoenix Absinthe GraphQL Token Check
+# Approov Backend Quickstart - Elixir Phoenix Absinthe GraphQL
 
-[Approov](https://approov.io) is an API security solution used to verify that requests received by your backend services originate from trusted versions of your mobile apps.
+This project provides a server-side example of Approov token verification for a protected backend API. It exposes a simple API that verifies Approov tokens before granting access to protected endpoints and demonstrates how the endpoints behave under the current Approov configuration:
 
-This repo implements the Approov server-side request verification code in [Elixir](https://elixir-lang.org/), which performs the verification check before allowing valid traffic to be processed by the GraphQL API endpoint.
+ - `/unprotected` - no Approov token required.
+ - `/token-check` - requires a valid Approov token.
+ - `/token-binding` - requires a valid Approov token which is bound to a header value.
+ - `/token-double-binding` - requires a valid Approov token which is bound to two header values.
 
-This is an Approov integration quickstart example for the Elixir Phoenix framework. If you are looking for another Elixir integration you can check our list of [quickstarts](https://approov.io/docs/latest/approov-integration-examples/backend-api/), and if you don't find what you are looking for, then please let us know [here](https://approov.io/contact).
+1.**JWT Approov Token validation (signature + expiry)** is implemented
+2. **Token binding (`pay` + hash)** is implemented
+3. **Middleware enforcement
+4. **Binding value selection (what gets hashed)** is in
+5. **Protected route levels** are defined in
+6. **protected routes are registered** at
 
+1. **JWT Approov Token validation (signature + expiry)** is implemented in `ApproovApplication.ApproovToken.decode_and_verify/1` ([lib/ApproovApplication.ex#L158-L195](lib/ApproovApplication.ex#L158-L195)).
+2. **Token binding (`pay` + hash)** is implemented in `ApproovApplication.ApproovToken.verify_binding/2` + `hash_binding_value/1` ([lib/ApproovApplication.ex#L201-L222](lib/ApproovApplication.ex#L201-L222)).
+3. **Middleware enforcement** is in `ApproovApplication.Plugs.ApproovTokenPlug.call/2` and `ApproovApplication.Plugs.ApproovTokenBindingPlug.call/2` ([lib/ApproovApplication.ex#L240-L305](lib/ApproovApplication.ex#L240-L305)).
+4. **Binding value selection (what gets hashed)** is in `ApproovApplication.ApproovToken.binding_value_for_request/1` ([lib/ApproovApplication.ex#L123-L139](lib/ApproovApplication.ex#L123-L139)).
+5. **Protected route levels** are defined in `ApproovApplication.ProtectedRoutes.@protected_route_levels` ([lib/ApproovApplication.ex#L60-L70](lib/ApproovApplication.ex#L60-L70)).
+6. **Protected routes are registered** in `ApproovApplication.Router` ([lib/ApproovApplication.ex#L431-L454](lib/ApproovApplication.ex#L431-L454)).
 
-## Approov Integration Quickstart
+## Approov Token Verification Flow
 
-The quickstart was tested with the following Operating Systems:
+1. **Token Request:**  
+   The Approov SDK inside the mobile app securely communicates with the Approov Cloud Service to obtain a short-lived [Approov Token](https://ext.approov.io/docs/latest/approov-usage-documentation/#approov-tokens) (a signed JWT).  
+   Additionally, you can use the CLI [token commands](https://ext.approov.io/docs/latest/approov-cli-tool-reference/#token-commands) to validate tokens, generate new ones, and set the data hash.
 
-* Ubuntu 20.04
-* MacOS Big Sur
-* Windows 10 WSL2 - Ubuntu 20.04
+2. **Token Attachment:**  
+   The app attaches this token to every API request using the `Approov-Token` HTTP header.
 
-First, setup the [Approov CLI](https://approov.io/docs/latest/approov-installation/index.html#initializing-the-approov-cli).
+3. **Server Validation:**  
+   The [server verifies](https://ext.approov.io/docs/latest/approov-usage-documentation/#approov-architecture) the token using the shared Approov secret, checking its:
+    - Signature authenticity
+    - Expiration (`exp` claim)
+    - Other claims if configured
 
-Now, register the API domain for which Approov will issues tokens:
+4. **Token Binding (Optional):**  
+   [Token binding](https://ext.approov.io/docs/latest/approov-usage-documentation/#token-binding) is configured by the app via the Approov SDK, which hashes a chosen binding value (for example the `Authorization` header) and embeds it into the Approov token.  
+   The protected API then computes the same hash from the incoming request and verifies that it matches the `pay` claim, preventing token reuse or replay attacks. For local testing, you can also generate example tokens with a binding using the Approov CLI.
 
-```bash
-approov api -add api.example.com
-```
+5. **Request Decision:**   
+      If all checks pass → the request is trusted and processed `200 OK`.   
+      If validation fails → the server responds with `401 Unauthorized`.
 
-> **NOTE:** By default a symmetric key (HS256) is used to sign the Approov token on a valid attestation of the mobile app for each API domain it's added with the Approov CLI, so that all APIs will share the same secret and the backend needs to take care to keep this secret secure.
->
-> A more secure alternative is to use asymmetric keys (RS256 or others) that allows for a different keyset to be used on each API domain and for the Approov token to be verified with a public key that can only verify, but not sign, Approov tokens.
->
-> To implement the asymmetric key you need to change from using the symmetric HS256 algorithm to an asymmetric algorithm, for example RS256, that requires you to first [add a new key](https://approov.io/docs/latest/approov-usage-documentation/#adding-a-new-key), and then specify it when [adding each API domain](https://approov.io/docs/latest/approov-usage-documentation/#keyset-key-api-addition). Please visit [Managing Key Sets](https://approov.io/docs/latest/approov-usage-documentation/#managing-key-sets) on the Approov documentation for more details.
+## Requirements:
 
-Next, enable your Approov `admin` role with:
+1. ***Approov account*** - If you're new, sign up for an [Approov trial account](https://approov.io/signup).
+2. ***Approov CLI initialized*** - Follow the [installation guide](https://ext.approov.io/docs/latest/approov-installation/#initializing-the-approov-cli) and confirm `approov whoami` works.
+3. ***Install curl*** - Ensure the `curl` CLI is available.
+4. ***Create .env file*** - copy `.env.example` so there is a place to store the secret key.
+    ```bash
+    cp .env.example .env
+    ```
 
-```bash
-eval `approov role admin`
-````
+5. ***Configure secret*** - fetch the secret and add it to `.env` (`APPROOV_BASE64URL_SECRET`):
+   ```bash
+   approov secret -get base64url
+   ```
 
-For the Windows powershell:
+6. ***Register API domain*** - point Approov at your backend API (default example.com):
+   ```bash
+   approov api -add example.com
+   ```
 
-```bash
-set APPROOV_ROLE=admin:___YOUR_APPROOV_ACCOUNT_NAME_HERE___
-```
+7. ***Install Docker and Docker Compose*** - follow the official guide: [Docker docs](https://docs.docker.com/get-started/get-docker/)
 
-Now, retrieve the [Approov secret](https://approov.io/docs/latest/approov-usage-documentation/#account-secret-key-export):
+## Try it yourself using Docker
 
-```bash
-approov secret -get base64Url
-```
-
-Next, export the Approov secret into the environment:
-
-```env
-export APPROOV_BASE64URL_SECRET=approov_base64url_secret_here
-```
-
-Now, fetch the Approov secret in the `config/runtime.exs` file:
-
-```elixir
-approov_secret =
-  System.get_env("APPROOV_BASE64URL_SECRET") ||
-    raise "Environment variable APPROOV_BASE64URL_SECRET is missing."
-
-config :YOUR_APP, ApproovToken,
-  secret_key: approov_secret |> Base.url_decode64!(padding: false)
-```
-
-Next, add the [JWT dependency](https://github.com/joken-elixir/joken) to your `mix.exs` file:
-
-```elixir
-{:joken, "~> 2.4"},
-# Recommended JSON library
-{:jason, "~> 1.2"}
-```
-
-Now, fetch the new dependency:
+*If you have all requirements, you can run*
 
 ```bash
-mix deps.get
+bash run-server.sh
 ```
 
-Next, add the `ApproovToken` Module to your project:
+This script:
+- Builds and starts the container via `scripts/build.sh` (`docker build` + `docker run`) and waits for `/approov-state` to be ready.
 
-```elixir
-defmodule ApproovToken do
-  require Logger
+*Once finished, press `Ctrl+C` to stop log tailing; the container keeps running unless you stop it. Use `docker ps` to find the container name and `docker stop <container_name>` to stop it.*
 
-  use Joken.Config
+### Automated and Manual Testing
 
-  @impl Joken.Config
-  def token_config, do: default_claims(skip: [:aud, :iat, :iss, :jti, :nbf])
+*When the server is running (in a different terminal), validate the endpoints via the automated bash script or by running the manual checks below*
 
-  # Verifies the token from an HTTP request or from a Websockets connection/event
-  def verify_token(params) do
-    with {:ok, approov_token} <- _get_approov_token(params),
-         {:ok, approov_token_claims} <- _decode_and_verify(approov_token) do
-
-      {:ok, approov_token_claims}
-    else
-      {:error, reason} ->
-        Logger.info(%{approov_token_error: reason})
-        {:error, reason}
-    end
-  end
-
-
-  ########################
-  # APPROOV TOKEN FETCH
-  ########################
-
-  # For when the Approov token is the header of a regular HTTP Request
-  defp _get_approov_token(%Plug.Conn{} = conn) do
-    case Plug.Conn.get_req_header(conn, "x-approov-token") do
-      [] ->
-        Logger.info("Approov token not in the headers. Next, try to retrieve from url query params.")
-        Logger.info(%{headers: conn.req_headers, params: conn.params})
-        _get_approov_token(conn.params)
-
-      [approov_token | _] ->
-        {:ok, approov_token}
-    end
-  end
-
-  # For when the Approov token is provided in the URL parameters or in a payload.
-  defp _get_approov_token(%{"x-approov-token" => approov_token}), do: {:ok, approov_token}
-  defp _get_approov_token(%{"X-Approov-Token" => approov_token}), do: {:ok, approov_token}
-
-  defp _get_approov_token(%{x_headers: x_headers}) when is_list(x_headers) do
-    case Utils.filter_list_of_tuples(x_headers, "x-approov-token") do
-      nil ->
-        {:ok, Utils.filter_list_of_tuples(x_headers, "X-Approov-Token")}
-
-      approov_token ->
-        {:ok, approov_token}
-    end
-  end
-
-  # For when is not possible to retrieve the Approov token.
-  defp _get_approov_token(_params) do
-    {:error, :missing_approov_token}
-  end
-
-
-  ########################
-  # APPROOV TOKEN CHECK
-  ########################
-
-  defp _decode_and_verify(approov_token) do
-    secret = Application.fetch_env!(:todo, ApproovToken)[:secret_key]
-
-    # call `verify_and_validate/2` injected by `use Joken.Config`
-    case verify_and_validate(approov_token, Joken.Signer.create("HS256", secret)) do
-      {:ok, %{"exp" => _expiration}} = result ->
-        result
-
-      # The library only checks the `exp` when present, and verifies successfully
-      # without it, and doesn't have an option to enforce it.
-      {:ok, _claims} ->
-        {:error, :missing_expiration_time}
-
-      result ->
-        result
-    end
-  end
-
-end
+```bash
+bash test.sh
 ```
 
-### Approov Token Check for HTTP
+This script:
+- Verifies that the `approov` and `curl` commands are installed.
+- Checks Approov status by calling `/approov-state` (enabled vs disabled).
+- Runs endpoint tests against `/unprotected` (no token), `/token-check` (valid/invalid Approov tokens), `/token-binding` (token bound to `Authorization`), and `/token-double-binding` (token bound to `Authorization` + `Content-Digest`).
+- Logs full request/response details to `.config/logs/<timestamp>.log`.
 
-Now, add the [Approov Token Plug](/src/approov-protected-server/token-check/todo/lib/todo_web/plugs/approov_token_plug.ex) module to your project at `lib/your_app_web/plugs/approov_token_plug.ex`:
+#### *1. Unprotected Endpoint (No Approov)*
 
-```elixir
-defmodule YourAppWeb.ApproovTokenPlug do
-  require Logger
+- The client sends a normal HTTP request.
+- The server **does not verify** any Approov token or extra authentication header.
+- This means **any client** (even tampered or unauthorized) can call the API if they know the URL.
 
-  ##############################################################################
-  # Adhere to the Phoenix Module Plugs specification by implementing:
-  #   * init/1
-  #   * call/2
-  #
-  # @link https://hexdocs.pm/phoenix/plug.html#module-plugs
-  ##############################################################################
+*The following example shows how the API responds when no Approov protection is applied.*
 
-  # Don't use this function to init the Plug with the Approov secret, because
-  # this is only evaluated at compile time, and we don't want the to have
-  # secrets inside a release. Secrets must always be retrieved from the
-  # environment where the release is running.
-  def init(opts), do: opts
-
-  # Allows to use the GraphqiQL web interface without requiring the Approov
-  # token that is required for all requests in production.
-  if Mix.env() in [:dev, :test] do
-    # Allows to load the web interface for GraphiQL at `example.com/graphiql`
-    # without checking for the Approov token.
-    def call(%{method: "GET", request_path: "/graphiql"} = conn, _options), do: conn
-
-    # The GraphqiQL web interface does some introspection queries to help with
-    # validation and auto-completion, therefore we must allow them without
-    # the need for an Approov token.
-    def call(%{method: "POST", request_path: "/graphiql", params: %{"query" => "\n  query IntrospectionQuery" <> _query}} = conn, _options), do: conn
-  end
-
-  def call(conn, _opts) do
-    case ApproovToken.verify_token(conn) do
-      {:ok, approov_token_claims} ->
-        conn
-        |> Plug.Conn.put_private(:approov_token_claims, approov_token_claims)
-
-      {:error, _reason} ->
-        conn
-        |> _halt_connection()
-    end
-  end
-
-  # When the Approov token validation fails we return a `401` with an empty body,
-  # because we don't want to give clues to an attacker about the reason the
-  # request failed, and you can go even further by returning a `400`. Feel free
-  # to modify as you see fits best your use case.
-  defp _halt_connection(conn) do
-    conn
-    |> Plug.Conn.put_status(401)
-    |> Phoenix.Controller.json(%{})
-    |> Plug.Conn.halt()
-  end
-end
+```bash
+curl -iX GET http://localhost:8080/unprotected
 ```
 
-Next, create and use the pipeline for the Approov token check at `lib/your_app_web/router.ex`:
-
-```elixir
-pipeline :approov_token do
-  # Ideally you will not want to add any other Plug before the Approov Token
-  # check to protect your server from wasting resources in processing requests
-  # not having a valid Approov token. This increases availability for your
-  # users during peak time or in the event of a DoS attack(We all know the
-  # BEAM design allows to cope very well with this scenarios, but best to play
-  # in the safe side).
-  plug YourAppWeb.ApproovTokenPlug
-end
-
-pipeline :graphql do
-  plug YourAppWeb.AbsintheContextPlug
-end
-
-scope "/auth" do
-  pipe_through :api
-  pipe_through :approov_token
-
-  post "/signup", YourAppWeb.AuthController, :signup
-  post "/login", YourAppWeb.AuthController, :login
-end
-
-# The `/graphiql` endpoint exposes too much to attackers, thus it shouldn't
-# be available in production.
-if Mix.env() in [:dev, :test] do
-  scope "/graphiql" do
-    pipe_through :approov_token
-    pipe_through :graphql
-
-    forward "/", Absinthe.Plug.GraphiQL,
-      schema: YourAppWeb.Schema,
-      socket: YourAppWeb.UserSocket,
-      log: false
-  end
-end
-
-# Needs to be after the /graphiql endpoint scope, otherwise we get this API,
-# instead of the expected /graphiql web interface.
-scope "/" do
-  pipe_through :api
-  pipe_through :approov_token
-  pipe_through :graphql
-
-  forward "/", Absinthe.Plug,
-    schema: YourAppWeb.Schema,
-    log: false
-end
+The response will be `200 OK` for this request:
+```text
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-cache
 ```
 
-### Approov Token Check for Websockets
+#### *2. Approov Token Check*
 
-This step is only necessary if you want to protect the HTTPS request to establish a socket connection, like when Absinthe subscriptions or Phoenix Channels are used.
+- The client includes an `Approov-Token` (a short-lived JWT) in each API request header.
+- The server verifies this token using the **Approov secret key** that is securely configured on the backend and checks:
+    -  Token verification - confirms the token is signed by the Approov secret.
+    -  Expiration (`exp` claim) - ensures the token is still valid.
+- If the token is valid → request is trusted.
+- If invalid → server returns `401 Unauthorized`.
+- **Purpose**: Protect API endpoints so that only authentic, unmodified Approov-integrated apps can access them.
 
-Unfortunately the Phoenix socket implementation only allows to retrieve headers from the HTTPS request establishing the socket connection when they start with an `x`, also known as the prefix for non standard HTTP headers.
+***The following example shows how the API responds when an Approov token is required.***
 
-To enable retrieving the `x` headers, add `connect_info: [:x_headers]` to your socket configuration in the file `endpoint.ex`. It should look similar to this:
+*Generate a valid Approov token:*
 
-```elixir
-# lib/your_app_web/endpoint.ex
-
-socket "/socket", YourAppWeb.UserSocket,
-  websocket: [
-    compress: true,
-    connect_info: [
-      :x_headers, # ADD THIS LINE TO YOUR WEBSOCKET CONFIGURATION
-    ],
-  ],
+```bash
+approov token -genExample example.com
 ```
 
-> **NOTE:** Putting sensitive data in an URL query parameter is not a best security practice, thus you should avoid as much as possible to put it there. You may think that once the request is over HTTPS it isn't an issue, but you need to remember that the full URL, including the query parameters, are often logged by applications, load balancers, API gateways, etc., thus causing any sensitive data on them to be leaked to the logs. Attackers usually build their attacks based on a chain of exploits, like getting the token from a compromised logging server and subsequently use it on automated or manual attacks. Just search in `shodan.io` for your logging server of choice to see how many are left accidentally publicly exposed to the internet, and attackers have automated tools scanning non-stop for them.
+*Use the generated token in the `Approov-Token` header and `/token-check` endpoint.*
 
-This will enable to retrieve the `X-Approov-Token` header from the HTTPS request establishing the socket connection, that will be available under the second parameter in the `connect/2` callback when implementing the `PhoenixSocket` behaviour, that usually is named as `connect_info`. For example:
-
-```elixir
-# lib/your_app_web/channels/user_socket.ex
-
-defmodule YourAppWeb.UserSocket do
-  use Phoenix.Socket
-
-  use Absinthe.Phoenix.Socket, schema: YourAppWeb.Schema
-
-  @impl true
-  def connect(params, socket, connect_info) do
-    socket
-    |> _authorize(params, connect_info)
-  end
-
-  @impl true
-  def id(_socket), do: nil
-
-  defp _authorize(socket, params, connect_info) do
-
-    # We need to merge them because the requests from the GraphiQL web interface
-    # doesn't populate the `connect_info` with the Approov token.
-    headers = Map.merge(params, connect_info)
-
-    # Always perform the Approov token check before the User Authentication.
-    with {:ok, _approov_token_claims} <- ApproovToken.verify_token(headers),
-         {:ok, current_user} <- Todos.User.authorize(params: params) do
-
-      socket = Absinthe.Phoenix.Socket.put_options(socket, context: %{current_user: current_user})
-
-      {:ok, socket}
-    else
-      {:error, _reason} ->
-        :error
-    end
-  end
-end
+```bash
+curl -iX GET http://localhost:8080/token-check \
+     -H "Approov-Token: valid_approov_token_here"
 ```
 
-Not enough details in the bare bones quickstart? No worries, check the [detailed quickstarts](QUICKSTARTS.md) that contain a more comprehensive set of instructions, including how to test the Approov integration.
+The response will be `200 OK` for this request:
 
+```text
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-cache
+```
 
-## More Information
+*If you use an invalid or missing token, the server will respond with `401 Unauthorized`.*
 
-* [Approov Overview](OVERVIEW.md)
-* [Detailed Quickstarts](QUICKSTARTS.md)
-* [Step by Step Examples](EXAMPLES.md)
-* [Testing](TESTING.md)
+#### *3. Approov Token Binding Check*
 
-### System Clock
+- The client sends two headers on authenticated API calls:
+    - `Approov-Token`
+    - `Authorization` – your auth token value (e.g., `ExampleAuthToken==`)
+- The server verifies the token and ensures that the bound value matches what the app used.
+- Prevents token replay - the Approov token cannot be reused or stolen for another session.
+- **Use case:** Stronger protection for authenticated API calls tied to a specific user or device.
 
-In order to correctly check for the expiration times of the Approov tokens is very important that the backend server is synchronizing automatically the system clock over the network with an authoritative time source. In Linux this is usually done with a NTP server.
+***The following example shows how the API responds when an Approov token with binding is required.***
 
+*Generate a valid Approov token bound to the `Authorization` header:*
 
-## Issues
+```bash
+approov token -setDataHashInToken ExampleAuthToken== -genExample example.com
+```
 
-If you find any issue while following our instructions then just report it [here](https://github.com/approov/quickstart-elixir-phoenix-absinthe-graphql-token-check/issues), with the steps to reproduce it, and we will sort it out and/or guide you to the correct path.
+*Use the generated token with binding in the Approov-Token and Authorization headers when calling the /token-binding endpoint.*
 
+```bash
+curl -iX GET http://localhost:8080/token-binding \
+     -H "Approov-Token: valid_approov_token_here" \
+     -H "Authorization: ExampleAuthToken=="
+```
+
+The response will be `200 OK` for this request:
+
+```text
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-cache
+```
+
+*If you use an invalid or missing header or token, the server will respond with `401 Unauthorized`.*
+
+#### Approov Token Binding Check with Two Different Bound Values
+
+- The client sends three headers on authenticated API calls:
+    - `Approov-Token`
+    - `Authorization`
+    - `Content-Digest` It is combined with the `Authorization` header to create a stronger binding.
+- Both are included in the hash inside the Approov token. This means the server verifies a single hash that covers both authentication credentials.
+- **Use case:** Stronger protection then single binding by tying both headers together.
+
+***The following example shows how the API responds when an Approov token with two bindings is required.***
+
+*Generate a valid Approov token bound to the `Authorization` and `Content-Digest` headers:*
+
+```bash
+approov token -setDataHashInToken ExampleAuthToken==ContentDigest== -genExample example.com
+```
+
+*Use the generated token with two bindings in the Approov-Token and Authorization headers when calling the `/token-double-binding` endpoint.*
+
+```bash
+curl -iX GET http://localhost:8080/token-double-binding \
+     -H "Approov-Token: valid_approov_token_here" \
+     -H "Authorization: ExampleAuthToken==" \
+     -H "Content-Digest: ContentDigest=="
+```
+
+The response will be `200 OK` for this request.
+
+```text
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-cache
+```
+
+*If you use an invalid or missing header or token, the server will respond with `401 Unauthorized`.*
+
+## Enable or Disable Approov Protection      
+
+When the example server is running on `localhost:8080`, you can toggle Approov protection with these commands:
+
+```bash
+curl -X POST http://localhost:8080/approov/disable    # disable the Approov service
+
+curl -X POST http://localhost:8080/approov/enable     # enable the Approov service
+
+curl -X GET http://localhost:8080/approov-state       # check current state
+```
+
+*You can rerun the tests with Approov disabled to observe how the application behaves when the Approov protection is ***no longer active***.*
+
+## Reporting Issues
+
+**Environments where the quickstart was tested:**
+```text
+* Runtime: {{RUNTIME_VERSION}}
+* Framework: {{LANGUAGE}} {{FRAMEWORK}}
+* Build Tool: {{BUILD_TOOL}} {{BUILD_TOOL_VERSION}}
+```
+
+If you encounter any problems while following this guide, or have any other concerns, please let us know by opening an issue [here](https://github.com/approov/quickstart-elixir-phoenix-absinthe-graphql-token-check/issues) and we will be happy to assist you.
 
 ## Useful Links
 
-If you wish to explore the Approov solution in more depth, then why not try one of the following links as a jumping off point:
-
-* [Approov Free Trial](https://approov.io/signup)(no credit card needed)
-* [Approov Get Started](https://approov.io/product/demo)
-* [Approov QuickStarts](https://approov.io/docs/latest/approov-integration-examples/)
-* [Approov Docs](https://approov.io/docs)
-* [Approov Blog](https://approov.io/blog/)
+* [Approov QuickStarts](https://approov.io/resource/quickstarts/)
+* [Approov Docs](https://ext.approov.io/docs)
+* [Approov Blog](https://approov.io/blog)
 * [Approov Resources](https://approov.io/resource/)
 * [Approov Customer Stories](https://approov.io/customer)
-* [Approov Support](https://approov.io/contact)
+* [Approov Support](https://approov.io/info/technical-support)
 * [About Us](https://approov.io/company)
-* [Contact Us](https://approov.io/contact)
+* [Contact Us](https://approov.io/info/contact)

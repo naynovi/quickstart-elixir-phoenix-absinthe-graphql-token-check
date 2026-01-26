@@ -1,3 +1,10 @@
 .env
 .editor.vars
 .elixir-docker-stack-defaults
+.config
+.DS_Store
+.elixir_ls/
+.DS_Store
+_build
+deps
+mix.lock
