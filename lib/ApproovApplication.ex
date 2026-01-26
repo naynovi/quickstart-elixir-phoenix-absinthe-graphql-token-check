@@ -99,7 +99,7 @@ defmodule ApproovApplication.ApproovToken do
       {:ok, claims}
     else
       {:error, reason} ->
-        Logger.info(%{approov_token_error: reason})
+        Logger.debug(%{approov_token_error: reason})
         {:error, reason}
     end
   end
@@ -111,7 +111,7 @@ defmodule ApproovApplication.ApproovToken do
       :ok
     else
       {:error, reason} ->
-        Logger.info(%{approov_token_binding_error: reason})
+        Logger.debug(%{approov_token_binding_error: reason})
         {:error, reason}
     end
   end
@@ -120,9 +120,7 @@ defmodule ApproovApplication.ApproovToken do
     {:error, :missing_approov_claims}
   end
 
-  # ----------------------------
   # Binding value selection (what gets hashed)
-  # ----------------------------
   def binding_value_for_request(%Plug.Conn{request_path: path} = conn) do
     case ApproovApplication.ProtectedRoutes.binding_headers_for_path(path) do
       [] ->
@@ -139,9 +137,7 @@ defmodule ApproovApplication.ApproovToken do
     end
   end
 
-  # ----------------------------
   # Approov token fetch
-  # ----------------------------
   defp fetch_token(%Plug.Conn{} = conn) do
     case Plug.Conn.get_req_header(conn, @approov_header) do
       [token | _] ->
@@ -155,9 +151,7 @@ defmodule ApproovApplication.ApproovToken do
     end
   end
 
-  # ----------------------------
   # JWT Approov token validation (signature + expiry)
-  # ----------------------------
   defp decode_and_verify(token) when is_binary(token) do
     signer = Joken.Signer.create("HS256", approov_secret!())
 
@@ -198,9 +192,7 @@ defmodule ApproovApplication.ApproovToken do
     Application.fetch_env!(:approov_quickstart, :approov_secret)
   end
 
-  # ----------------------------
   # Token binding (pay + hash)
-  # ----------------------------
   defp verify_binding(%{"pay" => pay} = _claims, binding_value) when is_binary(pay) do
     expected = String.trim(pay)
     computed = hash_binding_value(binding_value)
@@ -316,7 +308,7 @@ defmodule ApproovApplication.Plugs.AbsintheContextPlug do
 end
 
 defmodule ApproovApplication.ApproovController do
-  use Phoenix.Controller, namespace: ApproovApplication
+  use Phoenix.Controller, formats: [:json]
 
   def home(conn, _params) do
     json(conn, ApproovApplication.State.info_payload("Approov demo API is running on port 8080."))
@@ -474,7 +466,8 @@ defmodule ApproovApplication.Endpoint do
   use Phoenix.Endpoint, otp_app: :approov_quickstart
 
   plug Plug.RequestId
-  plug Plug.Logger
+  # Keep startup info logs, but silence request logs at info level.
+  plug Plug.Logger, log: :debug
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],

@@ -14,11 +14,18 @@ This project provides a server-side example of Approov token verification for a 
 5. **Protected route levels** are defined in
 6. **protected routes are registered** at
 
-1. **JWT Approov Token validation (signature + expiry)** is implemented in `ApproovApplication.ApproovToken.decode_and_verify/1` ([lib/ApproovApplication.ex#L158-L195](lib/ApproovApplication.ex#L158-L195)).
-2. **Token binding (`pay` + hash)** is implemented in `ApproovApplication.ApproovToken.verify_binding/2` + `hash_binding_value/1` ([lib/ApproovApplication.ex#L201-L222](lib/ApproovApplication.ex#L201-L222)).
+In this example:
+
+1. **JWT Approov Token validation (signature + expiry)** is implemented in [decode_and_verify/1](https://github.com/approov/elixir-phoenix-absinthe-graphql-token-check/blob/refactor/elixir-phoenix-/lib/ApproovApplication.ex#L158-L195)).
+
+2. **Token binding (`pay` + hash)** is handled by [verify_binding/2 & hash_binding_value/1](lib/ApproovApplication.ex#L201-L222)).
+
 3. **Middleware enforcement** is in `ApproovApplication.Plugs.ApproovTokenPlug.call/2` and `ApproovApplication.Plugs.ApproovTokenBindingPlug.call/2` ([lib/ApproovApplication.ex#L240-L305](lib/ApproovApplication.ex#L240-L305)).
+
 4. **Binding value selection (what gets hashed)** is in `ApproovApplication.ApproovToken.binding_value_for_request/1` ([lib/ApproovApplication.ex#L123-L139](lib/ApproovApplication.ex#L123-L139)).
+
 5. **Protected route levels** are defined in `ApproovApplication.ProtectedRoutes.@protected_route_levels` ([lib/ApproovApplication.ex#L60-L70](lib/ApproovApplication.ex#L60-L70)).
+
 6. **Protected routes are registered** in `ApproovApplication.Router` ([lib/ApproovApplication.ex#L431-L454](lib/ApproovApplication.ex#L431-L454)).
 
 ## Approov Token Verification Flow
@@ -236,9 +243,9 @@ curl -X GET http://localhost:8080/approov-state       # check current state
 
 **Environments where the quickstart was tested:**
 ```text
-* Runtime: {{RUNTIME_VERSION}}
-* Framework: {{LANGUAGE}} {{FRAMEWORK}}
-* Build Tool: {{BUILD_TOOL}} {{BUILD_TOOL_VERSION}}
+* Runtime: Elixir 1.19.5
+* Framework: Phoenix 1.8.3
+* Build Tool: Mix 1.19.5
 ```
 
 If you encounter any problems while following this guide, or have any other concerns, please let us know by opening an issue [here](https://github.com/approov/quickstart-elixir-phoenix-absinthe-graphql-token-check/issues) and we will be happy to assist you.
