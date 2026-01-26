@@ -7,26 +7,22 @@ This project provides a server-side example of Approov token verification for a 
  - `/token-binding` - requires a valid Approov token which is bound to a header value.
  - `/token-double-binding` - requires a valid Approov token which is bound to two header values.
 
-1.**JWT Approov Token validation (signature + expiry)** is implemented
-2. **Token binding (`pay` + hash)** is implemented
-3. **Middleware enforcement
-4. **Binding value selection (what gets hashed)** is in
-5. **Protected route levels** are defined in
-6. **protected routes are registered** at
-
 In this example:
 
-1. **JWT Approov Token validation (signature + expiry)** is implemented in [decode_and_verify/1](https://github.com/approov/elixir-phoenix-absinthe-graphql-token-check/blob/refactor/elixir-phoenix-/lib/ApproovApplication.ex#L158-L195)).
+1. **JWT Approov Token validation (signature + expiry)** is implemented in [decode_and_verify/1](https://github.com/approov/quickstart-elixir-phoenix-absinthe-graphql-token-check/blob/refactor/elixir-phoenix-absinthe-graphql/lib/ApproovApplication.ex#L154-L170).
+It verifies the HS256 signature and rejects tokens that are missing or past `exp`.
 
-2. **Token binding (`pay` + hash)** is handled by [verify_binding/2 & hash_binding_value/1](lib/ApproovApplication.ex#L201-L222)).
+2. **Token binding (`pay` + hash)** is handled by [verify_binding/2 & hash_binding_value/1](https://github.com/approov/quickstart-elixir-phoenix-absinthe-graphql-token-check/blob/refactor/elixir-phoenix-absinthe-graphql/lib/ApproovApplication.ex#L195-L214).
+It computes `base64(sha256(binding_value))` and compares it to `pay` with a constant‑time check.
 
-3. **Middleware enforcement** is in `ApproovApplication.Plugs.ApproovTokenPlug.call/2` and `ApproovApplication.Plugs.ApproovTokenBindingPlug.call/2` ([lib/ApproovApplication.ex#L240-L305](lib/ApproovApplication.ex#L240-L305)).
+3. **Middleware enforcement** is done by [ApproovTokenPlug.call/2](https://github.com/approov/quickstart-elixir-phoenix-absinthe-graphql-token-check/blob/refactor/elixir-phoenix-absinthe-graphql/lib/ApproovApplication.ex#L245-L257) and [ApproovTokenBindingPlug.call/2](https://github.com/approov/quickstart-elixir-phoenix-absinthe-graphql-token-check/blob/refactor/elixir-phoenix-absinthe-graphql/lib/ApproovApplication.ex#L280-L289).
+Requests without valid token/binding are rejected with 401.
 
-4. **Binding value selection (what gets hashed)** is in `ApproovApplication.ApproovToken.binding_value_for_request/1` ([lib/ApproovApplication.ex#L123-L139](lib/ApproovApplication.ex#L123-L139)).
+4. **Binding value selection (what gets hashed)** is in [binding_value_for_request/1](https://github.com/approov/quickstart-elixir-phoenix-absinthe-graphql-token-check/blob/refactor/elixir-phoenix-absinthe-graphql/lib/ApproovApplication.ex#L123-L137). It uses the headers configured in `ProtectedRoutes` (currently `Authorization` for single binding, or `Authorization` + `Content‑Digest` for double binding).
 
-5. **Protected route levels** are defined in `ApproovApplication.ProtectedRoutes.@protected_route_levels` ([lib/ApproovApplication.ex#L60-L70](lib/ApproovApplication.ex#L60-L70)).
+5. **Protected route requirements** are defined in [ProtectedRoutes](https://github.com/approov/quickstart-elixir-phoenix-absinthe-graphql-token-check/blob/refactor/elixir-phoenix-absinthe-graphql/lib/ApproovApplication.ex#L63-L70).
 
-6. **Protected routes are registered** in `ApproovApplication.Router` ([lib/ApproovApplication.ex#L431-L454](lib/ApproovApplication.ex#L431-L454)).
+6. **Protected routes are registered** in [ApproovApplication.Router](https://github.com/approov/quickstart-elixir-phoenix-absinthe-graphql-token-check/blob/refactor/elixir-phoenix-absinthe-graphql/lib/ApproovApplication.ex#L404-L462).
 
 ## Approov Token Verification Flow
 
