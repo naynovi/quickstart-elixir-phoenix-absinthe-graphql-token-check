@@ -2,6 +2,8 @@ defmodule ApproovApplication.Application do
   use Application
 
   def start(_type, _args) do
+    ApproovApplication.ApproovToken.log_secret_status()
+
     children = [
       ApproovApplication.State,
       ApproovApplication.Endpoint
@@ -66,7 +68,7 @@ defmodule ApproovApplication.ProtectedRoutes do
     "/token-check" => %{approov: :required, binding_headers: []},
     "/token-binding" => %{approov: :required, binding_headers: ["authorization"]},
     "/token-double-binding" =>
-      %{approov: :required, binding_headers: ["authorization", "content-digest"]}
+      %{approov: :required, binding_headers: ["authorization", "sessionid"]}
   }
 
   def levels, do: @protected_route_levels
@@ -86,6 +88,15 @@ defmodule ApproovApplication.ApproovToken do
   use Joken.Config
 
   @approov_header "approov-token"
+  @secret_env "APPROOV_BASE64URL_SECRET"
+  @secret_placeholder "approov_base64url_secret_here"
+  @secret_log_missing_key {:approov_secret_log, :missing}
+  @secret_log_invalid_key {:approov_secret_log, :invalid}
+
+  def log_secret_status do
+    _ = approov_secret()
+    :ok
+  end
 
   @impl Joken.Config
   def token_config do
@@ -153,20 +164,14 @@ defmodule ApproovApplication.ApproovToken do
 
   # JWT Approov token validation (signature + expiry)
   defp decode_and_verify(token) when is_binary(token) do
-    signer = Joken.Signer.create("HS256", approov_secret!())
-
-    case verify_and_validate(token, signer) do
-      {:ok, %{"exp" => exp} = claims} ->
-        case ensure_not_expired(exp) do
-          :ok -> {:ok, claims}
-          {:error, _} = error -> error
-        end
-
-      {:ok, _claims} ->
-        {:error, :missing_expiration}
-
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, secret} <- approov_secret(),
+         signer <- Joken.Signer.create("HS256", secret),
+         {:ok, %{"exp" => exp} = claims} <- verify_and_validate(token, signer),
+         :ok <- ensure_not_expired(exp) do
+      {:ok, claims}
+    else
+      {:ok, _claims} -> {:error, :missing_expiration}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -188,8 +193,43 @@ defmodule ApproovApplication.ApproovToken do
     {:error, :invalid_expiration}
   end
 
-  defp approov_secret! do
-    Application.fetch_env!(:approov_quickstart, :approov_secret)
+  defp approov_secret do
+    case System.get_env(@secret_env) do
+      nil ->
+        case Application.fetch_env(:approov_quickstart, :approov_secret) do
+          {:ok, secret} ->
+            {:ok, secret}
+
+          :error ->
+            log_secret_issue_once(@secret_log_missing_key, "Required secret is not set")
+            {:error, :approov_secret_missing}
+        end
+
+      @secret_placeholder ->
+        log_secret_issue_once(@secret_log_missing_key, "Required secret is not set")
+        {:error, :approov_secret_missing}
+
+      value ->
+        case Base.url_decode64(value, padding: false) do
+          {:ok, secret} ->
+            {:ok, secret}
+
+          :error ->
+            log_secret_issue_once(@secret_log_invalid_key, "Required secret is invalid")
+            {:error, :approov_secret_invalid}
+        end
+    end
+  end
+
+  defp log_secret_issue_once(key, message) do
+    case :persistent_term.get(key, false) do
+      true ->
+        :ok
+
+      false ->
+        Logger.error(message, secret_env: @secret_env)
+        :persistent_term.put(key, true)
+    end
   end
 
   # Token binding (pay + hash)
@@ -229,6 +269,121 @@ defmodule ApproovApplication.ApproovToken do
   defp empty_to_nil(value), do: value
 end
 
+defmodule ApproovApplication.Plugs.RequestLoggingPlug do
+  @moduledoc false
+  require Logger
+
+  def init(opts), do: opts
+
+  def call(conn, _opts) do
+    Plug.Conn.register_before_send(conn, fn conn ->
+      status = conn.status || 0
+
+      if status in [200, 401] do
+        metadata = request_metadata(conn, status)
+        Logger.info("http.request.completed #{format_metadata(metadata)}", metadata)
+      end
+
+      conn
+    end)
+  end
+
+  defp request_metadata(conn, status) do
+    [
+      summary: summary(conn, status),
+      method: conn.method,
+      path: conn.request_path,
+      status: status,
+      ip: remote_ip(conn),
+      port: conn.port,
+      approovEnabled: ApproovApplication.State.approov_enabled?(),
+      tokenBindingEnabled: ApproovApplication.State.token_binding_enabled?(),
+      required_headers: required_headers(conn),
+      approov_reason: format_reason(conn.private[:approov_failure_reason])
+    ]
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+  end
+
+  defp format_metadata(metadata) do
+    metadata
+    |> Enum.into(%{})
+    |> inspect()
+  end
+
+  defp summary(conn, 401) do
+    "approov_failed:" <> failure_category(conn.private[:approov_failure_reason])
+  end
+
+  defp summary(conn, 200) do
+    if protected_path?(conn.request_path) do
+      if ApproovApplication.State.approov_enabled?() do
+        "approov_ok"
+      else
+        "approov_disabled"
+      end
+    else
+      "ok"
+    end
+  end
+
+  defp summary(_conn, _status), do: "ok"
+
+  defp failure_category(nil), do: "unauthorized"
+  defp failure_category(:missing_approov_token), do: "missing_approov_token"
+  defp failure_category(:missing_token_binding_headers), do: "missing_binding_header"
+  defp failure_category(:approov_invalid_token_binding), do: "binding_mismatch"
+  defp failure_category(:approov_token_missing_pay_claim), do: "binding_mismatch"
+  defp failure_category(:approov_secret_missing), do: "missing_approov_secret"
+  defp failure_category(:approov_secret_invalid), do: "invalid_approov_secret"
+  defp failure_category(:missing_approov_claims), do: "token_verification_failed"
+  defp failure_category(:binding_not_required), do: "token_verification_failed"
+  defp failure_category(_reason), do: "token_verification_failed"
+
+  defp format_reason(nil), do: nil
+  defp format_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp format_reason(reason) when is_binary(reason), do: reason
+  defp format_reason(reason), do: inspect(reason)
+
+  defp required_headers(conn) do
+    path = conn.request_path
+
+    if ApproovApplication.State.approov_enabled?() and protected_path?(path) do
+      headers = ["Approov-Token"]
+
+      if ApproovApplication.State.token_binding_enabled?() do
+        binding_headers = ApproovApplication.ProtectedRoutes.binding_headers_for_path(path)
+        headers ++ Enum.map(binding_headers, &canonical_header/1)
+      else
+        headers
+      end
+    else
+      []
+    end
+  end
+
+  defp protected_path?(path) when is_binary(path) do
+    Map.has_key?(ApproovApplication.ProtectedRoutes.levels(), path)
+  end
+
+  defp canonical_header("authorization"), do: "Authorization"
+  defp canonical_header("sessionid"), do: "SessionId"
+
+  defp canonical_header(header) when is_binary(header) do
+    header
+    |> String.split("-")
+    |> Enum.map(&String.capitalize/1)
+    |> Enum.join("-")
+  end
+
+  defp remote_ip(%Plug.Conn{remote_ip: nil}), do: nil
+
+  defp remote_ip(%Plug.Conn{remote_ip: ip}) do
+    ip
+    |> :inet.ntoa()
+    |> to_string()
+  end
+end
+
 defmodule ApproovApplication.Plugs.ApproovTokenPlug do
   @moduledoc false
 
@@ -248,16 +403,17 @@ defmodule ApproovApplication.Plugs.ApproovTokenPlug do
         {:ok, claims} ->
           Plug.Conn.put_private(conn, :approov_token_claims, claims)
 
-        {:error, _reason} ->
-          halt_unauthorized(conn)
+        {:error, reason} ->
+          halt_unauthorized(conn, reason)
       end
     else
       conn
     end
   end
 
-  defp halt_unauthorized(conn) do
+  defp halt_unauthorized(conn, reason) do
     conn
+    |> Plug.Conn.put_private(:approov_failure_reason, reason)
     |> Plug.Conn.put_status(401)
     |> Phoenix.Controller.json(%{})
     |> Plug.Conn.halt()
@@ -281,15 +437,16 @@ defmodule ApproovApplication.Plugs.ApproovTokenBindingPlug do
     if ApproovApplication.State.token_binding_enabled?() do
       case ApproovApplication.ApproovToken.verify_token_binding(conn) do
         :ok -> conn
-        {:error, _reason} -> halt_unauthorized(conn)
+        {:error, reason} -> halt_unauthorized(conn, reason)
       end
     else
       conn
     end
   end
 
-  defp halt_unauthorized(conn) do
+  defp halt_unauthorized(conn, reason) do
     conn
+    |> Plug.Conn.put_private(:approov_failure_reason, reason)
     |> Plug.Conn.put_status(401)
     |> Phoenix.Controller.json(%{})
     |> Plug.Conn.halt()
@@ -366,7 +523,7 @@ defmodule ApproovApplication.ApproovController do
     response =
       response
       |> Map.put(:authorizationHeaderPresent, header_present?(conn, "authorization"))
-      |> Map.put(:contentDigestHeaderPresent, header_present?(conn, "content-digest"))
+      |> Map.put(:sessionIdHeaderPresent, header_present?(conn, "sessionid"))
 
     json(conn, response)
   end
@@ -468,6 +625,7 @@ defmodule ApproovApplication.Endpoint do
   plug Plug.RequestId
   # Keep startup info logs, but silence request logs at info level.
   plug Plug.Logger, log: :debug
+  plug ApproovApplication.Plugs.RequestLoggingPlug
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
