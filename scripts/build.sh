@@ -22,12 +22,10 @@ WAIT_URL="${WAIT_URL:-http://localhost:${HOST_PORT}/approov-state}" # readiness 
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-60}"                   # how long to wait before failing readiness
 WAIT_INTERVAL="${WAIT_INTERVAL:-2}"                   # delay between readiness checks
 CONTAINER_PORT="${CONTAINER_PORT:-$HOST_PORT}"       # container listener, defaults to host port
-IMAGE_NAME="${IMAGE_NAME:-approov-quickstart-elixir-phoenix-absinthe}"
-CONTAINER_NAME="${CONTAINER_NAME:-approov-quickstart-elixir-phoenix-absinthe-app}"
+IMAGE_NAME="${IMAGE_NAME:-approov-quickstart-java-spring}"
+CONTAINER_NAME="${CONTAINER_NAME:-approov-quickstart-java-spring-app}"
 ENV_FILE="${ENV_FILE:-.env}"
 RUNTIME_BIN_DIR="${RUNTIME_BIN_DIR:-}"            # optional runtime-specific bin path
-APPROOV_SECRET_ENV="${APPROOV_SECRET_ENV:-APPROOV_BASE64URL_SECRET}"
-APPROOV_SECRET_PLACEHOLDER="${APPROOV_SECRET_PLACEHOLDER:-approov_base64url_secret_here}"
 
 trim_whitespace() {
   local value="$1"
@@ -92,7 +90,10 @@ fi
 
 [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found. Run cp .env.example .env first."
 [[ -f Dockerfile ]] || fail "Dockerfile not found in $(pwd)"
-validate_approov_secret_env "$ENV_FILE" "$APPROOV_SECRET_ENV" "$APPROOV_SECRET_PLACEHOLDER"
+validate_approov_secret_env \
+  "$ENV_FILE" \
+  "${APPROOV_SECRET_ENV:-APPROOV_BASE64URL_SECRET}" \
+  "${APPROOV_SECRET_PLACEHOLDER:-approov_base64url_secret_here}"
 
 if docker ps -a --format '{{.Names}}' | grep -Fxq "$CONTAINER_NAME"; then
   info "Removing stale container ${CONTAINER_NAME}"
