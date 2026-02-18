@@ -201,22 +201,37 @@ defmodule ApproovApplication.ApproovToken do
             {:ok, secret}
 
           :error ->
-            log_secret_issue_once(@secret_log_missing_key, "Required secret is not set")
+            log_secret_issue_once(
+              @secret_log_missing_key,
+              "Required secret is not set. Invalid examples: APPROOV_BASE64URL_SECRET=approov_base64url_secret_here or APPROOV_BASE64URL_SECRET="
+            )
             {:error, :approov_secret_missing}
         end
 
-      @secret_placeholder ->
-        log_secret_issue_once(@secret_log_missing_key, "Required secret is not set")
-        {:error, :approov_secret_missing}
-
       value ->
-        case Base.url_decode64(value, padding: false) do
-          {:ok, secret} ->
-            {:ok, secret}
+        trimmed_value = String.trim(value)
 
-          :error ->
-            log_secret_issue_once(@secret_log_invalid_key, "Required secret is invalid")
-            {:error, :approov_secret_invalid}
+        cond do
+          trimmed_value == "" or value == @secret_placeholder ->
+            log_secret_issue_once(
+              @secret_log_missing_key,
+              "Required secret is not set. Invalid examples: APPROOV_BASE64URL_SECRET=approov_base64url_secret_here or APPROOV_BASE64URL_SECRET="
+            )
+            {:error, :approov_secret_missing}
+
+          true ->
+            case Base.url_decode64(value, padding: false) do
+              {:ok, secret} when byte_size(secret) > 0 ->
+                {:ok, secret}
+
+              {:ok, _empty_secret} ->
+                log_secret_issue_once(@secret_log_invalid_key, "Required secret is invalid: decoded value is empty")
+                {:error, :approov_secret_invalid}
+
+              :error ->
+                log_secret_issue_once(@secret_log_invalid_key, "Required secret is invalid")
+                {:error, :approov_secret_invalid}
+            end
         end
     end
   end

@@ -1,16 +1,25 @@
 import Config
 
-approov_secret_base64url =
-  System.get_env("APPROOV_BASE64URL_SECRET") ||
-    raise "APPROOV_BASE64URL_SECRET is required"
+approov_secret_env = "APPROOV_BASE64URL_SECRET"
+approov_secret_placeholder = "approov_base64url_secret_here"
+
+approov_secret_base64url = System.get_env(approov_secret_env)
+
+if is_nil(approov_secret_base64url) or String.trim(approov_secret_base64url) == "" or
+     approov_secret_base64url == approov_secret_placeholder do
+  raise "#{approov_secret_env} is not set. Invalid examples: APPROOV_BASE64URL_SECRET=approov_base64url_secret_here or APPROOV_BASE64URL_SECRET="
+end
 
 approov_secret =
   case Base.url_decode64(approov_secret_base64url, padding: false) do
-    {:ok, secret} ->
+    {:ok, secret} when byte_size(secret) > 0 ->
       secret
 
+    {:ok, _empty_secret} ->
+      raise "#{approov_secret_env} is invalid: decoded value is empty"
+
     :error ->
-      raise "APPROOV_BASE64URL_SECRET must be base64url encoded"
+      raise "#{approov_secret_env} must be base64url encoded"
   end
 
 http_port = System.get_env("HTTP_PORT") || "8080"
