@@ -1,0 +1,18 @@
+# VCS and local metadata
+.git
+.gitignore
+.DS_Store
+
+# Local env and editor/tooling state
+.env
+.env.*
+!.env.example
+.elixir_ls/
+.config/
+
+# Build artifacts and dependencies from host
+_build/
+deps/
+
+# Misc local files
+*.log

@@ -404,19 +404,11 @@ defmodule ApproovApplication.Plugs.ApproovTokenPlug do
           Plug.Conn.put_private(conn, :approov_token_claims, claims)
 
         {:error, reason} ->
-          halt_unauthorized(conn, reason)
+          ApproovApplication.Plugs.ApproovUnauthorized.reject(conn, reason)
       end
     else
       conn
     end
-  end
-
-  defp halt_unauthorized(conn, reason) do
-    conn
-    |> Plug.Conn.put_private(:approov_failure_reason, reason)
-    |> Plug.Conn.put_status(401)
-    |> Phoenix.Controller.json(%{})
-    |> Plug.Conn.halt()
   end
 end
 
@@ -437,18 +429,23 @@ defmodule ApproovApplication.Plugs.ApproovTokenBindingPlug do
     if ApproovApplication.State.token_binding_enabled?() do
       case ApproovApplication.ApproovToken.verify_token_binding(conn) do
         :ok -> conn
-        {:error, reason} -> halt_unauthorized(conn, reason)
+        {:error, reason} -> ApproovApplication.Plugs.ApproovUnauthorized.reject(conn, reason)
       end
     else
       conn
     end
   end
+end
 
-  defp halt_unauthorized(conn, reason) do
+defmodule ApproovApplication.Plugs.ApproovUnauthorized do
+  @moduledoc false
+
+  # Keep auth failure handling centralized. Upstream verification returns
+  # domain errors; this plug only maps them to an HTTP 401 boundary response.
+  def reject(conn, reason) do
     conn
     |> Plug.Conn.put_private(:approov_failure_reason, reason)
-    |> Plug.Conn.put_status(401)
-    |> Phoenix.Controller.json(%{})
+    |> Plug.Conn.resp(401, "")
     |> Plug.Conn.halt()
   end
 end
@@ -536,8 +533,27 @@ defmodule ApproovApplication.ApproovController do
   end
 end
 
+defmodule ApproovApplication.SchemaPrototype do
+  @moduledoc false
+
+  use Absinthe.Schema.Prototype
+
+  # Some Absinthe toolchains may request the GraphQL @oneOf directive while
+  # inlining prototype directive functions. Define it explicitly to avoid
+  # function-clause crashes in schema compilation.
+  directive :one_of do
+    description "Indicates an input object expects exactly one supplied field."
+    repeatable false
+    on [:input_object]
+    expand &__MODULE__.expand_one_of/2
+  end
+
+  def expand_one_of(_args, node), do: node
+end
+
 defmodule ApproovApplication.Schema do
   use Absinthe.Schema
+  @prototype_schema ApproovApplication.SchemaPrototype
 
   query do
     field :approov_state, :approov_state do
