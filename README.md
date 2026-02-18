@@ -241,6 +241,7 @@ curl -X GET http://localhost:8080/approov-state       # check current state
 ```text
 * Runtime: Elixir 1.19.5
 * Framework: Phoenix 1.8.3
+* GraphQL: Absinthe 1.7.11
 * Build Tool: Mix 1.19.5
 ```
 
